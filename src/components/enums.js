@@ -2,6 +2,8 @@ export const BUTTON_TEXT_ENUM = {
   ADD: "新增用户",
   VIEW: "查看",
   DELETE: "删除",
+  SEARCH_REST: "通过常规API查询",
+  SEARCH_GRAPHQL: "通过Graphql查询",
 };
 
 export const TIP_TEXT_ENUM = {

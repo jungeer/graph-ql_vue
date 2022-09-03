@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed } from "vue";
 import { Modal, Message } from "@arco-design/web-vue";
+
 import {
   httpGetUserDetailByUserId,
   httpAddUser,
@@ -18,36 +19,13 @@ import {
   API_TYPE_ENUM,
 } from "./enums";
 
-const API_REST_MAP = {
-  ADD: async () => {
-    openDrawer(API_TYPE_ENUM.REST);
-  },
-  VIEW: async (userId) => {
-    if (!userId) {
-      Message.warning(TIP_TEXT_ENUM.NO_USER_ID);
-      return;
-    }
-    const res = await httpGetUserDetailByUserId({ userId });
-    const userInfoStr = Object.keys(userFieldMap).reduce(
-      (pre, cur) => pre + `${userFieldMap[cur]}：${res.data[cur] || " - "}；`,
-      ""
-    );
-    Modal.info({
-      title: TIP_TEXT_ENUM.MODAL_USER_DETIAL_TITLE(userId),
-      content: userInfoStr,
-    });
-  },
-  DELETE: async (userId) => {
-    if (!userId) {
-      Message.warning(TIP_TEXT_ENUM.NO_USER_ID);
-      return;
-    }
-    await httpDeleteUserByUserId({ userId });
-    Message.success(TIP_TEXT_ENUM.DELETE_SUCCESS);
-    closeModal();
-    requestGetTableData();
-  },
-};
+import { useQuery, useMutation } from "@vue/apollo-composable";
+import {
+  getUserListGraphql,
+  getUserDetailByUserIdGraphql,
+  addUserGraphql,
+  deleteUserByUserIdGraphql,
+} from "./graphql";
 
 const ButtonType = ref("");
 
@@ -63,9 +41,26 @@ const getGraphqlButtonText = computed(() => {
   return `GraphQL方式 ${getModalTitle.value}`;
 });
 
-onMounted(async () => {
+const searchByRest = () => {
   requestGetTableData();
+};
+
+const getUserListEnabled = ref(false);
+
+const { refetch: getUserListRefetch, onResult: getUserListRes } = useQuery(
+  getUserListGraphql,
+  null,
+  {
+    enabled: getUserListEnabled,
+  }
+);
+getUserListRes((res) => {
+  userTableData.value = res.data?.userList || [];
 });
+const searchByGraphql = async () => {
+  getUserListEnabled.value = true;
+  getUserListRefetch();
+};
 
 const curClickTableRecord = ref({});
 
@@ -84,11 +79,95 @@ const closeModal = () => {
   isModalVisible.value = false;
 };
 
+const modalInfoShowUserDetail = (userId, userInfo) => {
+  const userInfoStr = Object.keys(userFieldMap).reduce(
+    (pre, cur) => pre + `${userFieldMap[cur]}：${userInfo[cur] || " - "}；`,
+    ""
+  );
+  Modal.info({
+    title: TIP_TEXT_ENUM.MODAL_USER_DETIAL_TITLE(userId),
+    content: userInfoStr,
+  });
+};
+
+const API_REST_MAP = {
+  ADD: async () => {
+    openDrawer(API_TYPE_ENUM.REST);
+  },
+  VIEW: async (userId) => {
+    if (!userId) {
+      Message.warning(TIP_TEXT_ENUM.NO_USER_ID);
+      return;
+    }
+    const res = await httpGetUserDetailByUserId({ userId });
+    modalInfoShowUserDetail(userId, res.data);
+  },
+  DELETE: async (userId) => {
+    if (!userId) {
+      Message.warning(TIP_TEXT_ENUM.NO_USER_ID);
+      return;
+    }
+    await httpDeleteUserByUserId({ userId });
+    Message.success(TIP_TEXT_ENUM.DELETE_SUCCESS);
+    closeModal();
+    requestGetTableData();
+  },
+};
+
 const requestRestServer = async () => {
   await API_REST_MAP[ButtonType.value](curClickTableRecord.value.userId);
 };
 
-const requestGraphqlServer = async () => {};
+const queryUserId = ref("");
+
+const getUserDetailEnabled = ref(false);
+
+const { refetch: getUserDetailRefetch, onResult: getUserDetailRes } = useQuery(
+  getUserDetailByUserIdGraphql,
+  () => ({
+    userId: queryUserId.value,
+  }),
+  {
+    enabled: getUserDetailEnabled,
+  }
+);
+getUserDetailRes((res) => {
+  if (!res.data?.userInfo) return;
+  modalInfoShowUserDetail(res.data.userInfo.userId, res.data.userInfo);
+});
+
+const { mutate: addUserByGraphql } = useMutation(addUserGraphql);
+
+const { mutate: deleteUserByGraphql } = useMutation(deleteUserByUserIdGraphql);
+
+const API_GRAPHQL_MAP = {
+  ADD: async () => {
+    openDrawer(API_TYPE_ENUM.GRAPH_QL);
+  },
+  VIEW: async (userId) => {
+    if (!userId) {
+      Message.warning(TIP_TEXT_ENUM.NO_USER_ID);
+      return;
+    }
+    queryUserId.value = userId;
+    getUserDetailEnabled.value = true;
+    getUserDetailRefetch();
+  },
+  DELETE: async (userId) => {
+    if (!userId) {
+      Message.warning(TIP_TEXT_ENUM.NO_USER_ID);
+      return;
+    }
+    await deleteUserByGraphql({ userId });
+    Message.success(TIP_TEXT_ENUM.DELETE_SUCCESS);
+    closeModal();
+    requestGetTableData();
+  },
+};
+
+const requestGraphqlServer = async () => {
+  await API_GRAPHQL_MAP[ButtonType.value](curClickTableRecord.value.userId);
+};
 
 const isDrawerVisible = ref(false);
 
@@ -115,11 +194,17 @@ const clickDrawerOk = async () => {
     if (error) return;
     if (openDrawerType.value === API_TYPE_ENUM.REST) {
       await httpAddUser(userFormValues.value);
-      Message.success(TIP_TEXT_ENUM.ADD_SUCCESS);
-      closeDrawer();
-      requestGetTableData();
-      return;
+    } else {
+      await addUserByGraphql({
+        userInfo: {
+          ...userFormValues.value,
+          userAge: Number(userFormValues.value.userAge),
+        },
+      });
     }
+    Message.success(TIP_TEXT_ENUM.ADD_SUCCESS);
+    closeDrawer();
+    requestGetTableData();
   });
 };
 
@@ -134,6 +219,21 @@ const clickDrawerCancel = () => {
       <a-button type="primary" @click="openModal(OPERATION_TYPE.ADD)">{{
         BUTTON_TEXT_ENUM.ADD
       }}</a-button>
+      <a-tooltip :popup-visible="true" mini content="全量返回" position="top">
+        <a-button @click="searchByRest">{{
+          BUTTON_TEXT_ENUM.SEARCH_REST
+        }}</a-button>
+      </a-tooltip>
+      <a-tooltip
+        :popup-visible="true"
+        mini
+        content="按需查询用户ID和用户姓名"
+        position="top"
+      >
+        <a-button @click="searchByGraphql">{{
+          BUTTON_TEXT_ENUM.SEARCH_GRAPHQL
+        }}</a-button>
+      </a-tooltip>
     </template>
     <a-table
       :columns="userTableColumns"
@@ -189,6 +289,7 @@ const clickDrawerCancel = () => {
   gap: 10px;
 }
 ::v-deep(.arco-card-header-title) {
-  text-align: left;
+  display: flex;
+  gap: 10px;
 }
 </style>

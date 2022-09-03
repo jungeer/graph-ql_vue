@@ -1,10 +1,31 @@
-import { createApp } from "vue";
+import { createApp, h, provide } from "vue";
 import "./style.css";
-
-import ArcoVue from "@arco-design/web-vue";
 
 import App from "./App.vue";
 
+import {
+  ApolloClient,
+  createHttpLink,
+  InMemoryCache,
+} from "@apollo/client/core";
+
+import { DefaultApolloClient } from "@vue/apollo-composable";
+
+import ArcoVue from "@arco-design/web-vue";
+
 import "@arco-design/web-vue/dist/arco.css";
 
-createApp(App).use(ArcoVue).mount("#app");
+const link = createHttpLink({ uri: "http://localhost:3000/graphql" });
+const cache = new InMemoryCache();
+const apolloClient = new ApolloClient({ link, cache });
+
+createApp({
+  setup() {
+    provide(DefaultApolloClient, apolloClient);
+  },
+  render() {
+    return h(App);
+  },
+})
+  .use(ArcoVue)
+  .mount("#app");
